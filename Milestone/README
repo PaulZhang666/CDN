@@ -1,0 +1,46 @@
+############################################################################################### 
+# Project: Roll your own CND
+# Delivery:  
+#           1. HTTPServer.py
+#           2. DNSServer.py   
+#           3. makefile  
+#           4. README
+# Team: WhiteHat
+# Members: Yifan Zhang (zhang.yifan2@husky.neu.edu)  Xinyi Zhang (zhang.xinyi@husky.neu.edu)
+# Date: 04/13/2016
+###############################################################################################
+
+Milestone April 13 2016
+====================================================================================
+0x01 High-Level approach
+    1) HTTPServer.py
+        => This provides basic HTTP server function of only support client to fetch web pages,
+           ie. not support POST, DELETE request. 
+        => The server will run on a specified port (40000 - 65535) of any machines
+        => Psuedo code
+            if file exists in server:
+                respond client with the file
+            elif file didn't exist in server:
+                fetch specific file on original server
+                respond client with newly fetched file
+
+    2) DNSServer.py
+        => this provides basic DNS Server function with the purpose of return client optimal IP
+          (download fastest replica IP, not complete in milestone). 
+        => the same as HTTP server, it will run on a specified port (40000 - 65535) of cs5700cdnproject.ccs.neu.edu
+        => To be simple, we implement DNS protocol with UDP, choose class type as Internet and DNS Record Type is A record 
+        => psuedo code 
+             1. accept client DNS Query
+             2. parse client DNS Query
+             3. select best replica based on our strategy 
+             4. compose DNS answers 
+             5. respond answers to client  
+0x02 Performance enhance technique
+    For this section we prepare to try two strategies and find the best one.
+    1) select best replica based on IP Geographic information (We use http://ip-api.com/ API to fetch geo info of a particular IP)
+    2) select best replica based on latency between client and replica plus the latency between replica and original server
+        => we would run a particular service to send ping information periodically from replica server to both client and original
+           and keep these records in a file which is used for dns to make decision. 
+0x03 Challenges
+    1) the most difficult thing in this stage is how to parse and compose DNS packet because the client's DNS query seems varied in DNS Record type (different type has different RDATA field format). We referred number of blogs and RFC specifications to solve it. 
+
