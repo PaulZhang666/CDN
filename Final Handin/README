@@ -1,0 +1,155 @@
+############################################################################################### 
+# Project: Roll your own CND
+# Delivery:  
+#           1. HTTPServer.py
+#           2. DNSServer.py   
+#           3. makefile  
+#           4. README
+# Team: WhiteHat
+# Members: Yifan Zhang (zhang.yifan2@husky.neu.edu)  Xinyi Zhang (zhang.xinyi@husky.neu.edu)
+# Date: 04/13/2016
+# Last Modified Date: 04/27/2016
+###############################################################################################
+
+Milestone April 13 2016
+====================================================================================
+0x01 High-Level approach
+    1) HTTPServer.py
+        => This provides basic HTTP server function of only support client to fetch web pages,
+           ie. not support POST, DELETE request. 
+        => The server will run on a specified port (40000 - 65535) of any machines
+        => Psuedo code
+            if file exists in server:
+                respond client with the file
+            elif file didn't exist in server:
+                fetch specific file on original server
+                respond client with newly fetched file
+
+    2) DNSServer.py
+        => this provides basic DNS Server function with the purpose of return client optimal IP
+          (download fastest replica IP, not complete in milestone). 
+        => the same as HTTP server, it will run on a specified port (40000 - 65535) of cs5700cdnproject.ccs.neu.edu
+        => To be simple, we implement DNS protocol with UDP, choose class type as Internet and DNS Record Type is A record 
+        => psuedo code 
+             1. accept client DNS Query
+             2. parse client DNS Query
+             3. select best replica based on our strategy 
+             4. compose DNS answers 
+             5. respond answers to client  
+0x02 Performance enhance technique
+    For this section we prepare to try two strategies and find the best one.
+    1) select best replica based on IP Geographic information (We use http://ip-api.com/ API to fetch geo info of a particular IP)
+    2) select best replica based on latency between client and replica plus the latency between replica and original server
+        => we would run a particular service to send ping information periodically from replica server to both client and original
+           and keep these records in a file which is used for dns to make decision. 
+0x03 Challenges
+    1) the most difficult thing in this stage is how to parse and compose DNS packet because the client's DNS query seems varied in DNS Record type (different type has different RDATA field format). We referred number of blogs and RFC specifications to solve it. 
+
+	
+Final Project April 27 2016
+====================================================================================
+0x01 Design Decisions
+	Best Replica
+	   Solutions:
+			1) Active Measurement
+				By mean the Active Measurement, we run a self defined TCP server (performanceMeasureServer.py) which will be deployed at the same time on all replicas.
+			Process:
+				   1. This server receives client IP from DNS server.
+				   2. Get average RTT(Round Trip Time) from scamper ping result
+				   3. Return average RTT to DNS server(latency)
+				   4. DNS server will get all replicas' response and select the replica IP with minimum latency
+				   5. DNS server return the replica IP to client 
+			2) Geographic
+				Geo-based selection strategy is that we use IP geo info database to choose a geographically cloest server to our client server.
+		    Process:
+				   1. DNS server send the client IP address to a third-party IP-Geo API
+				   2. IP-Geo API return DNS Server with the geo info of this IP address
+				   3. DNS server calculates the physical distance between client with each replica
+				   4. DNS server will choose the cloest replica and return to client
+				   
+		Trade-off decisions	
+			At first we want to implement best replica strategy by using online IP geo address database but after we run some tests, we decided to use Active Method
+			to finish our tasks. The reasons are listed here
+			1) Downloading faster is our purpose in this project. The less latency, the faster the user downloads.
+			2) Online Geo-IP API might not that reliable such as loosing connectivity to API due to serious congestion or other reasons like license is expired, server
+			   stopped, server maintainence. In addition, query online geo API will cause extra latency due to the HTTP request which will waste at least serveral MS.
+			3) The most important thing is that the closest physical path might not be the path has least latency because of the BGP settings of ISPs. I tested a client IP
+			   of Califonia. I use this IP to query latency from two replica servers - Vergina and N.California. But I found that the latency of Vergina is 27 ms while the
+			   latency of N.California is 36 ms.
+			
+			However, the latency based measurement still has some backwards
+			1) if all the latency of the replica is very large, we need spend a lot of time to wait response from performanceMeasureServer 
+			2) if there is a huge difference between latencies returned by each replica, it is wast time to wait all ping get their result
+			3) How many times should we ping a client in order to get rid of the performance degrade issues because of the time spent by ping program.
+			
+			Although, latency has some drawbacks but we can use other ways to mitigate those negative impacts. In this project, we use threading and combined with thread timeout
+			settings to avoid the time that wait all replicas return a result.	
+	Cache
+		1) LRU
+		   Least Recently Used algorithm. It will help us to age out the most oldest element in the cache and always keep the latest recently used element is cached in the memory
+		   our main design is to use two parts cache - in-memory cache and disk cache. in-memory cache is the most priority choice for us and then the disk cache and then download
+		   resources from remote server. We will cache both request URL and its correspond web content in an dictionary which is kept most time in memory.
+		   Our design logic is:
+		   1) Judge whether client's request resources in our in memory cache 
+		   2) If clieint's request resources are in memory cache, directly respond client with cache info in memory.
+		   3) If client's request resources are not in memory cache, check disk cache first.
+		   4) If client's request resources are in the disk cache, then directly pick up the resources from server disk and respond it to client.
+		   5) If client's request resources are not in the disk cache, then download the resources from original server, cache the resources in memory cache first.
+		   6) If in-memory cache reached the maxmium size, then age out the oldest element and keep this element in disk cache. Add new resources in in-memory cache.
+		   7) If disk cache reached the maxmium size, then we age-out the oldest cached element on the file system, which means that client need to ask this resources
+			  again from origional server and cache it again. 
+		2) LFU
+		   Least Frequency Used. This alogrithm will always keep the most hot resources in the cache because it will take visit times into consideration.
+		   This algorithm is quite suitable for request those resources which are not equally visited. Wikipedia-like resources are quite fitable with this algorithm.
+		   But unfortunately, we cannot realize it because its complexity.
+		3) HTTP Cache
+		   HTTP Cache help us to reduce the RTT time to remote original server while downloading. We cache both client's request path and client request resource as an keypair
+		   We implement two parts cache - in-memory cache and disk cache. These two will help us to maxmize the utilization of the server resources.
+		4) DNS Cache
+		   DNS Cache will help us to reduce the time wait for ping results from replicas. If there are large amount of new request of ping results, it will seriously downgrade the
+		   performance. If some replica don't work properly, then the program might stuck to wait it response.
+		5) trade-off decision
+			1. Disk cache VS Memory cache
+			   At the very first, we only want to implement the disk cache because it is quite easy to implement. But actually the only use disk cache strategy cannot get best effectiveness
+			   because read and write on the disk will cost extra performance degration. Also, the size we can use on disk is also a limit. So, finally we decided to use both as our chache
+			   strategy
+			2. LRU VS LFU
+			   LFU is the first choice, but we don't have enough time to test it out. In this particular case, LFU perform better than LRU.
+			3. HTTP Cache VS DNS Cache
+			   At first we only implement HTTP cache, which will reduce a number of time of repeat downloading files from original server. But we found that DNS Cache is also important because
+			   the latency between replicas and client might vary hugely. For example, replica in Vergina takes a RTT of 13 ms when respond to a client in Boston. But other replica in the same
+			   situation might take a 200ms RTT. So, if we ping many times, the latency differece becomes a huge burden in our progam. And, we found that each replica's RTT time to a client IP
+			   addres seems very stable for example Japen's replica respond to IP in Boston will always take 200ms. By given this situation, we decides to implement DNS cache to optimize our program.
+			   But our implement will not be suitable for those networks which are not that stable.
+0x02 Methdologies to test effectiveness
+		1) use different clients IP found in Google Search and these IP might come from different regions all over the world. These IPs help us to test whether our program will return best replica IP to
+		   the client
+		2) Find random pages on the Original server and record these URLs. Use client wget program to download these pages. We will test some pages more times to check whether the HTTP cache workds or not.
+		3) Design a DNS cache timeout mechanism which will be more reasonable because the latencies over network might change a lot over time. 
+0x03 Future work
+		1) Implement LFU algorithm when caching because this should be very usefull when view sites like wikipedia. The most visited page will always get fastest visit speed.
+		2) Design a strategy which can use geo and latency together to make a much more wise decision
+0x04 Top level design
+	Our design is presented in the flowing logic:
+	1) client request resources of a particular webpage from our DNSServer (dnsserver.py)
+	2) DNSserver send clients IP to performanceMeasureServer on each replica and get the latency info between each replica and client IP.
+	3) DNS server return's a replica IP with the lowest latency.
+	4) Client use this IP to contact replica's HTTP server (httpserver.py) for downloading resources
+	Deploy logic 
+		1) dnsserver.py & DelayProcess.py  are deployed to cs5700cdnproject.ccs.neu.edu
+		2) httpserver.py & performanceMeasureServer.py are deployed to each replia server
+	Call logic
+		1) dnsserver call DelayProcess to get the best latency's correspond replica IP.
+		2) DelayProcess will contact each performanceMeasureServer on each replica and get the latencies info.
+		3) dnsserver return best IP to client.
+		4) client contact httpserver on correspond replica to download resources
+0x05 Challenges
+	1) Memory and disk cache limitations
+	 As we only have both 10MB quta of system resources, disk and memory,we have a critical problem of how to estimate how many resouces are really used for our cache purpose.
+	 We cannot simply specify the maxmium size of cache is 10MB, we need to deduct the size used by other program and we need to compute available resources real-time. Disk 
+	 size is very easy to measure but the memory is so hard because in python we cannot 100% measure the size of an objects. The available memory of our cache is hard to calculate
+	 due to the variations of memory use. Our way to solve it is that we split total resouces into two parts, one for cache and other part for other programs. We test a lot of times
+	 we determined to use 7MB in in-memory cache and 3MB for other programs to run. But it might not reasonable when cases changes.
+	2) How to select the best replica
+	 The trade-off between choosing geo or latency is quite headache because both of them has some bright features but also has some serious drawbacks. In the consideration of the 
+	 test approach of this project, we think latency based strategy should be the most suitable one for us.
